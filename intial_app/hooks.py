@@ -256,3 +256,11 @@ app_license = "mit"
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+# doc_events = {
+#     "Payment Entry": {
+#         "on_submit": "intial_app.api.payment_entry.on_payment_entry_submit"
+#     }
+# }
+doctype_js = {
+    "Purchase Invoice": "public/js/purchase_invoice.js"
+}
