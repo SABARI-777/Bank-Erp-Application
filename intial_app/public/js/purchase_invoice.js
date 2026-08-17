@@ -1,40 +1,21 @@
 frappe.ui.form.on("Purchase Invoice", {
-
     refresh(frm) {
-
-        if (frm.is_new()) {
+        if (frm.is_new() || flt(frm.doc.outstanding_amount) <= 0) {
             return;
         }
 
-         if (flt(frm.doc.outstanding_amount) <= 0) {
-            return;
-        }
-
-         let payment_in_progress = false;
-
-        (frm.doc.custom_install || []).forEach(row => {
-
-            if (
-                row.payment_status === "Pending" ||
-                row.payment_status === "Processing"
-            ) {
-                payment_in_progress = true;
-            }
-
-        });
-
-         if (payment_in_progress) {
-            return;
-        }
-
-         frm.add_custom_button(
-            "Make Payment",
-            function () {
-                show_payment_dialog(frm);
-            }
+        let payment_in_progress = (frm.doc.custom_install || []).some(row =>
+            row.payment_status === "Pending" || row.payment_status === "Processing"
         );
-    }
 
+        if (payment_in_progress) {
+            return;
+        }
+
+        frm.add_custom_button("Make Payment", function () {
+            show_payment_dialog(frm);
+        });
+    }
 });
 
 function show_payment_dialog(frm) {
@@ -56,7 +37,6 @@ function show_payment_dialog(frm) {
             show_mode_of_payment_dialog(frm, bank_account);
         }
     });
-
     dialog.show();
 }
 
@@ -79,7 +59,6 @@ function show_mode_of_payment_dialog(frm, receiver_bank_account) {
             show_sender_account_dialog(frm, receiver_bank_account, mode_of_payment);
         }
     });
-
     dialog.show();
 }
 
@@ -102,16 +81,11 @@ function show_sender_account_dialog(frm, receiver_bank_account, mode_of_payment)
             get_sender_mobile(frm, receiver_bank_account, mode_of_payment, sender_account);
         }
     });
-
     dialog.show();
 }
 
 function get_sender_mobile(frm, receiver_bank_account, mode_of_payment, sender_account) {
-    frappe.db.get_value(
-        "Bank Account",
-        sender_account,
-        "custom_mobile_number"
-    ).then(r => {
+    frappe.db.get_value("Bank Account", sender_account, "custom_mobile_number").then(r => {
         let mobile = r.message ? r.message.custom_mobile_number : null;
 
         if (!mobile) {
@@ -119,54 +93,29 @@ function get_sender_mobile(frm, receiver_bank_account, mode_of_payment, sender_a
             return;
         }
 
-        console.log("Sender:", sender_account);
-        console.log("Mobile:", mobile);
-
-        request_payment_otp(
-            frm,
-            receiver_bank_account,
-            mode_of_payment,
-            sender_account,
-            mobile
-        );
+        request_payment_otp(frm, receiver_bank_account, mode_of_payment, sender_account, mobile);
     });
 }
 
-function request_payment_otp(
-    frm,
-    receiver_bank_account,
-    mode_of_payment,
-    sender_account,
-    mobile
-) {
+function request_payment_otp(frm, receiver_bank_account, mode_of_payment, sender_account, mobile) {
     frappe.call({
         method: "intial_app.api.payment.request_otp",
-        args: {
-            mobile: mobile
-        },
+        args: { mobile: mobile },
         freeze: true,
         freeze_message: "Sending OTP...",
-        callback: function(r) {
+        callback: function (r) {
             if (!r.message || !r.message.success) {
-                frappe.msgprint(
-                    r.message?.message || "Unable to send OTP."
-                );
+                frappe.msgprint(r.message?.message || "Unable to send OTP.");
                 return;
             }
 
-            let transaction_id = r.message.transaction_id;
             let otp_verification_id = r.message.otp_verification_id;
-
-            console.log("Transaction ID:", transaction_id);
-            console.log("OTP Verification ID:", otp_verification_id);
-
             show_otp_dialog(
                 frm,
                 receiver_bank_account,
                 mode_of_payment,
                 sender_account,
                 mobile,
-                transaction_id,
                 otp_verification_id
             );
         }
@@ -179,7 +128,6 @@ function show_otp_dialog(
     mode_of_payment,
     sender_account,
     mobile,
-    transaction_id,
     otp_verification_id
 ) {
     let dialog = new frappe.ui.Dialog({
@@ -200,14 +148,14 @@ function show_otp_dialog(
                 mode_of_payment,
                 sender_account,
                 mobile,
-                transaction_id,
                 otp_verification_id,
                 values.otp,
                 dialog
             );
         }
     });
-
+    console.log(mobile);
+    
     dialog.show();
 }
 
@@ -217,7 +165,6 @@ function verify_payment_otp(
     mode_of_payment,
     sender_account,
     mobile,
-    transaction_id,
     otp_verification_id,
     otp,
     dialog
@@ -225,15 +172,17 @@ function verify_payment_otp(
     frappe.call({
         method: "intial_app.api.payment.verify_otp",
         args: {
-            transaction_id: transaction_id,
             otp_verification_id: otp_verification_id,
             otp: otp,
             invoice_id: frm.doc.name,
-            mobile: mobile
+            mobile: mobile,
+            receiver_bank_account: receiver_bank_account,
+            mode_of_payment: mode_of_payment,
+            sender_account: sender_account
         },
         freeze: true,
         freeze_message: "Verifying OTP...",
-        callback: function(r) {
+        callback: function (r) {
             if (!r.message) {
                 frappe.msgprint("No response from Middleware.");
                 return;
@@ -241,85 +190,50 @@ function verify_payment_otp(
 
             let response = r.message;
 
-        
-        
-      if (!response.success) {
-
-        frappe.call({
-            method:
-                "intial_app.api.payment.save_otp_failure",
-
-            args: {
-                invoice_id: frm.doc.name,
-                transaction_id: transaction_id,
-                error: response.message,
-                otp_entered: otp,
-                mobile: mobile,
-                attempt_no: response.attempt_count
-            },
-
-            callback: function(r) {
-
-                console.log(
-                    "OTP failure saved:",
-                    r.message
-                );
-
-                if (response.max_attempts) {
-
-                    dialog.hide();
-
-                    frappe.msgprint(
-                        "Maximum 3 OTP attempts reached."
-                    );
-
-                } else {
-
-                    frappe.msgprint(
-                        `Invalid OTP. Attempt ${response.attempt_count} of 3.`
-                    );
-
-                    dialog.set_value("otp", "");
-                }
-            }
-        });
-
-        return;
-    }
-
-             
-            if (response.success) {
-                dialog.hide();
-
-                frappe.msgprint({
-                    title: "OTP Verified",
-                    message: "OTP verified successfully.",
-                    indicator: "green"
-                });
-
-                show_payment_amount_dialog(
-                    frm,
-                    receiver_bank_account,
-                    mode_of_payment,
-                    sender_account,
-                    mobile,
-                    transaction_id
-                );
-                return;
-            }
-
-          
-            if (response.attempt_no >= 3) {
-                dialog.hide();
-
-                frappe.msgprint({
-                    title: "OTP Failed",
-                    message: "Maximum 3 OTP attempts reached. Payment stopped.",
-                    indicator: "red"
+            if (!response.success) {
+                frappe.call({
+                    method: "intial_app.api.payment.save_otp_failure",
+                    args: {
+                        invoice_id: frm.doc.name,
+                        ref_no: otp_verification_id,
+                        error: response.message || "Invalid OTP",
+                        otp_entered: otp,
+                        mobile: mobile,
+                        attempt_no: response.attempt_count || 0
+                    },
+                    callback: function () {
+                        if (response.max_attempts) {
+                            dialog.hide();
+                            frappe.msgprint({
+                                title: "OTP Verification Terminated",
+                                message: "Maximum 3 OTP attempts reached. Payment cancelled.",
+                                indicator: "red"
+                            });
+                        } else {
+                            frappe.msgprint(`Invalid OTP. Attempt ${response.attempt_count || 0} of 3.`);
+                            dialog.set_value("otp", "");
+                        }
+                    }
                 });
                 return;
             }
 
+            dialog.hide();
+            frappe.msgprint({
+                title: "OTP Verified",
+                message: "OTP verified successfully.",
+                indicator: "green"
+            });
+
+            show_payment_amount_dialog(
+                frm,
+                receiver_bank_account,
+                mode_of_payment,
+                sender_account,
+                mobile,
+                response.transaction_id,
+                otp_verification_id
+            );
         }
     });
 }
@@ -330,7 +244,8 @@ function show_payment_amount_dialog(
     mode_of_payment,
     sender_account,
     mobile,
-    transaction_id
+    transaction_id,
+    otp_verification_id
 ) {
     let outstanding_amount = flt(frm.doc.outstanding_amount);
 
@@ -362,100 +277,47 @@ function show_payment_amount_dialog(
 
             dialog.hide();
 
-           create_processing_installation(
-    frm,
-    amount,
-    mobile,
-    transaction_id
-);
+            frappe.call({
+                method: "intial_app.api.payment.create_processing_payment",
+                args: {
+                    invoice_id: frm.doc.name,
+                    amount: amount,
+                    mobile: mobile,
+                    transaction_id: transaction_id,
+                    sender_account: sender_account,
+                    mode_of_payment: mode_of_payment,
+                    otp_verification_id: otp_verification_id
+                },
+                freeze: true,
+                freeze_message: "Creating Processing payment...",
+                callback: function (r) {
+                    if (!r.message || !r.message.success) {
+                        frappe.msgprint({
+                            title: "Payment Error",
+                            message: r.message?.message || "Could not create Processing payment.",
+                            indicator: "red"
+                        });
+                        return;
+                    }
 
-frm.save()
-    .then(() => {
-
-        console.log(
-            "Processing payment saved:",
-            transaction_id
-        );
-
-        process_payment(
-            frm,
-            receiver_bank_account,
-            mode_of_payment,
-            sender_account,
-            mobile,
-            transaction_id,
-            amount
-        );
-
-    })
-    .catch(error => {
-
-        console.error(
-            "Failed to save Processing payment:",
-            error
-        );
-
-        frappe.msgprint({
-            title: "Payment Error",
-            message:
-                "Could not save the Processing payment.",
-            indicator: "red"
-        });
-
-    })
+                    process_payment(
+                        frm,
+                        receiver_bank_account,
+                        mode_of_payment,
+                        sender_account,
+                        mobile,
+                        transaction_id,
+                        amount,
+                        r.message.installation_no
+                    );
+                }
+            });
         }
     });
 
     dialog.show();
 }
-function create_processing_installation(
-    frm,
-    amount,
-    mobile,
-    transaction_id
-) {
 
-    let existing_numbers =
-        (frm.doc.custom_install || [])
-        .map(row => flt(row.installation_no || 0));
-
-    let installation_no =
-        Math.max(0, ...existing_numbers) + 1;
-
-    let ref_no =
-        `${frm.doc.name}-${installation_no}`;
-
-    let row = frm.add_child(
-        "custom_install"
-    );
-
-    row.installation_no =
-        installation_no;
-
-    row.ref_no =
-        ref_no;
-
-    row.amount =
-        amount;
-
-    row.mobile =
-        mobile;
-
-    row.otp_status =
-        "Verified";
-
-    row.transaction_id =
-        transaction_id;
-
-    row.payment_status =
-        "Processing";
-
-    frm.refresh_field(
-        "custom_install"
-    );
-
-    return row;
-}
 function process_payment(
     frm,
     receiver_bank_account,
@@ -463,7 +325,8 @@ function process_payment(
     sender_account,
     mobile,
     transaction_id,
-    amount
+    amount,
+    install_no
 ) {
     frappe.call({
         method: "intial_app.api.payment.process_payment",
@@ -474,26 +337,25 @@ function process_payment(
             mobile: mobile,
             receiver_bank_account: receiver_bank_account,
             mode_of_payment: mode_of_payment,
-            sender_account: sender_account
+            sender_account: sender_account,
+            install_no: install_no
         },
         freeze: true,
         freeze_message: "Processing payment...",
-        callback: function(r) {
+        callback: function (r) {
             if (!r.message) {
                 frappe.msgprint("No response received from Middleware.");
                 return;
             }
 
-            let response = r.message;
-
-            console.log("Payment response:", response);
-
             store_payment_result(
                 frm,
-                response,
+                r.message,
                 amount,
                 mobile,
-                transaction_id
+                transaction_id,
+                sender_account,
+                mode_of_payment
             );
         }
     });
@@ -504,7 +366,9 @@ function store_payment_result(
     response,
     amount,
     mobile,
-    transaction_id
+    transaction_id,
+    sender_account,
+    mode_of_payment
 ) {
     frappe.call({
         method: "intial_app.api.payment.save_payment_result",
@@ -515,13 +379,15 @@ function store_payment_result(
             mobile: mobile,
             status: response.status,
             bank_reference: response.bank_reference,
-            failure_reason: response.reason
+            failure_reason: response.reason,
+            sender_account: sender_account,
+            mode_of_payment: mode_of_payment
         },
-        callback: function(r) {
+        callback: function (r) {
             if (!r.message || !r.message.success) {
                 frappe.msgprint({
                     title: "Payment Result Error",
-                    message: "Payment was processed, but the result could not be stored in the Purchase Invoice.",
+                    message: r.message?.message || "Payment processed, but saving result failed.",
                     indicator: "red"
                 });
                 return;
@@ -532,23 +398,19 @@ function store_payment_result(
             if (response.status === "SUCCESS") {
                 frappe.msgprint({
                     title: "Payment Successful",
-                    message: `
-                        <b>Payment Successful</b><br><br>
-                        Transaction ID: ${result.transaction_id}<br>
-                        Installation No: ${result.installation_no}<br>
-                        Amount: ₹${amount}<br>
-                        Bank Reference: ${result.bank_reference}
-                    `,
+                    message: `<b>Payment Successful</b><br><br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Installation No:</b> ${result.installation_no}<br><b>Amount:</b> ₹${amount}<br><b>Bank Reference:</b> ${result.bank_reference}<br><b>Payment Entry:</b> ${result.payment_entry || "Created"}`,
                     indicator: "green"
+                });
+            } else if (response.status === "PENDING") {
+                frappe.msgprint({
+                    title: "Payment Pending",
+                    message: `Payment is pending bank confirmation.<br><b>Transaction ID:</b> ${result.transaction_id}`,
+                    indicator: "orange"
                 });
             } else {
                 frappe.msgprint({
                     title: "Payment Failed",
-                    message: `
-                        Payment failed.<br><br>
-                        Transaction ID: ${result.transaction_id}<br>
-                        Reason: ${response.reason || "Unknown error"}
-                    `,
+                    message: `Payment failed.<br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Reason:</b> ${result.failure_reason || response.reason || "Unknown error"}`,
                     indicator: "red"
                 });
             }
