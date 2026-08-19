@@ -127,6 +127,8 @@ def create_processing_payment(invoice_id, amount, mobile, transaction_id, sender
 @frappe.whitelist(allow_guest=True)
 def process_payment(transaction_id, amount, invoice_id, mobile, receiver_bank_account, mode_of_payment, sender_account, install_no=None):
 
+
+    print("THIS IS FROM PROCESS CODE")
     if not sender_account or not receiver_bank_account:
         frappe.throw(_("Sender and Receiver Bank Accounts are required."))
 
@@ -150,8 +152,7 @@ def process_payment(transaction_id, amount, invoice_id, mobile, receiver_bank_ac
         "sender_account": sender_account,
         "install_no": install_no
     }
-
-
+   
     response = requests.post(f"{MIDDLEWARE_URL}.process_payment", json=payload, timeout=30)
     if response.status_code != 200:
         frappe.throw(_("Middleware Processing Error: {0}").format(response.text))

@@ -328,6 +328,8 @@ function process_payment(
     amount,
     install_no
 ) {
+
+    console.log("THIS IS PROCSS ")
     frappe.call({
         method: "intial_app.api.payment.process_payment",
         args: {
