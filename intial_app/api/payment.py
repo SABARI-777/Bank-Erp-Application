@@ -14,7 +14,7 @@ def request_otp(mobile):
     if not mobile:
         frappe.throw(_("Mobile number is required."))
 
-    response = requests.post(f"{MIDDLEWARE_URL}.request_otp", json={"mobile": mobile}, timeout=15)
+    response = requests.post(f"{MIDDLEWARE_URL}.request_otp", json={"mobile": mobile}, timeout=20)
 
     if response.status_code != 200:
         frappe.throw(_("Middleware Request Error: {0}").format(response.text))
@@ -51,7 +51,7 @@ def verify_otp(otp_verification_id, otp, invoice_id, mobile=None, receiver_bank_
         "sender_account": sender_account
     }
 
-    response = requests.post(f"{MIDDLEWARE_URL}.verify_otp", json=payload, timeout=15)
+    response = requests.post(f"{MIDDLEWARE_URL}.verify_otp", json=payload, timeout=20)
     if response.status_code != 200:
         frappe.throw(_("Middleware Verification Error: {0}").format(response.text))
 
@@ -112,7 +112,7 @@ def create_processing_payment(invoice_id, amount, mobile, transaction_id, sender
     row.mobile = mobile
     row.transaction_id = transaction_id
     row.otp_status = "Verified"
-    row.payment_status = "Processing"
+    row.payment_status = "Pending"
 
     invoice.save(ignore_permissions=True)
     return {
@@ -120,7 +120,7 @@ def create_processing_payment(invoice_id, amount, mobile, transaction_id, sender
         "installation_no": next_no,
         "ref_no": otp_verification_id,
         "transaction_id": transaction_id,
-        "payment_status": "Processing"
+        "payment_status": "Pending"
     }
 
 
@@ -153,7 +153,7 @@ def process_payment(transaction_id, amount, invoice_id, mobile, receiver_bank_ac
         "install_no": install_no
     }
    
-    response = requests.post(f"{MIDDLEWARE_URL}.process_payment", json=payload, timeout=30)
+    response = requests.post(f"{MIDDLEWARE_URL}.process_payment", json=payload, timeout=300)
     if response.status_code != 200:
         frappe.throw(_("Middleware Processing Error: {0}").format(response.text))
     return response.json().get("message")
@@ -173,6 +173,8 @@ def save_payment_result(invoice_id, transaction_id, amount, mobile, status, bank
     row.amount = flt(amount)
     row.mobile = mobile
     status_upper = str(status).upper()
+
+    print("THIS IS FROM ERP STATYS",status)
 
     if status_upper == "SUCCESS":
         row.payment_status = "Success"
@@ -213,6 +215,19 @@ def save_payment_result(invoice_id, transaction_id, amount, mobile, status, bank
             "transaction_id": transaction_id,
             "payment_status": "Pending"
         }
+    
+    elif status_upper == "REJECTED":
+            row.payment_status = "Failed"
+            row.bank_reference = bank_reference
+            row.failure_reason = failure_reason or "Payment failed."
+            invoice.save(ignore_permissions=True)
+            return {
+                "success": True,
+                "installation_no": row.installation_no,
+                "ref_no": row.ref_no,
+                "transaction_id": transaction_id,
+                "payment_status": "Pending"
+            }
 
     else:
         row.payment_status = "Failed"
@@ -260,3 +275,29 @@ def create_payment_entry_for_invoice(invoice_id, transaction_id, amount, sender_
     payment_entry.insert(ignore_permissions=True)
     payment_entry.submit()
     return payment_entry.name
+
+def call_middleware_payment_check():
+    url = (
+        "http://middleware_site:8000"
+        "/api/method/middleware_app.api.payment.check_pending_payments"
+    )
+
+    try:
+        response = requests.post(
+            url,
+            timeout=300
+        )
+
+        print("Middleware Status:", response.status_code)
+        print("Middleware Response:", response.text)
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "Middleware Payment Check Error"
+        )
+        raise

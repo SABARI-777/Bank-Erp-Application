@@ -261,6 +261,15 @@ app_license = "mit"
 #         "on_submit": "intial_app.api.payment_entry.on_payment_entry_submit"
 #     }
 # }
+
 doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js"
+}
+
+scheduler_events = {
+    "cron": {
+        "*/5 * * * *": [
+            "intial_app.api.payment.call_middleware_payment_check"
+        ]
+    }
 }
