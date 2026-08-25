@@ -1,5 +1,6 @@
 frappe.ui.form.on("Purchase Invoice", {
     refresh(frm) {
+        set_tax_status_permission(frm);
         if (frm.is_new() || flt(frm.doc.outstanding_amount) <= 0) {
             return;
         }
@@ -154,8 +155,6 @@ function show_otp_dialog(
             );
         }
     });
-    console.log(mobile);
-    
     dialog.show();
 }
 
@@ -191,30 +190,17 @@ function verify_payment_otp(
             let response = r.message;
 
             if (!response.success) {
-                frappe.call({
-                    method: "intial_app.api.payment.save_otp_failure",
-                    args: {
-                        invoice_id: frm.doc.name,
-                        ref_no: otp_verification_id,
-                        error: response.message || "Invalid OTP",
-                        otp_entered: otp,
-                        mobile: mobile,
-                        attempt_no: response.attempt_count || 0
-                    },
-                    callback: function () {
-                        if (response.max_attempts) {
-                            dialog.hide();
-                            frappe.msgprint({
-                                title: "OTP Verification Terminated",
-                                message: "Maximum 3 OTP attempts reached. Payment cancelled.",
-                                indicator: "red"
-                            });
-                        } else {
-                            frappe.msgprint(`Invalid OTP. Attempt ${response.attempt_count || 0} of 3.`);
-                            dialog.set_value("otp", "");
-                        }
-                    }
-                });
+                if (response.max_attempts) {
+                    dialog.hide();
+                    frappe.msgprint({
+                        title: "OTP Verification Terminated",
+                        message: "Maximum 3 OTP attempts reached. Payment cancelled.",
+                        indicator: "red"
+                    });
+                } else {
+                    frappe.msgprint(`Invalid OTP. Attempt ${response.attempt_count || 0} of 3.`);
+                    dialog.set_value("otp", "");
+                }
                 return;
             }
 
@@ -248,17 +234,39 @@ function show_payment_amount_dialog(
     otp_verification_id
 ) {
     let outstanding_amount = flt(frm.doc.outstanding_amount);
+    let tax_amount = flt(frm.doc.taxes_and_charges_added);
+    let tax_status = frm.doc.custom_tax_status || "Pending";
+
+    let payable_amount;
+    if (tax_status === "Accept") {
+        payable_amount = outstanding_amount - tax_amount;
+    } else {
+        payable_amount = outstanding_amount;
+    }
+    payable_amount = Math.max(payable_amount, 0);
 
     let dialog = new frappe.ui.Dialog({
         title: "Payment Amount",
         fields: [
             {
+                fieldname: "outstanding_display",
+                fieldtype: "HTML",
+                options: `
+                    <div style="margin-bottom: 15px;">
+                        <div><strong>Outstanding Amount:</strong> ₹${outstanding_amount.toFixed(2)}</div>
+                        <div><strong>Tax Amount:</strong> ₹${tax_amount.toFixed(2)}</div>
+                        <div><strong>Tax Status:</strong> ${tax_status}</div>
+                        <hr>
+                        <div style="font-size: 16px;"><strong>Payable Amount:</strong> ₹${payable_amount.toFixed(2)}</div>
+                    </div>
+                `
+            },
+            {
                 fieldname: "amount",
                 label: "Amount to Pay",
                 fieldtype: "Currency",
-                default: outstanding_amount,
-                reqd: 1,
-                description: `Outstanding Amount: ₹${outstanding_amount}`
+                default: payable_amount,
+                reqd: 1
             }
         ],
         primary_action_label: "Pay",
@@ -270,8 +278,8 @@ function show_payment_amount_dialog(
                 return;
             }
 
-            if (amount > outstanding_amount) {
-                frappe.msgprint(`You can pay maximum ₹${outstanding_amount}.`);
+            if (amount > payable_amount) {
+                frappe.msgprint(`You can pay maximum ₹${payable_amount.toFixed(2)}.`);
                 return;
             }
 
@@ -328,8 +336,6 @@ function process_payment(
     amount,
     install_no
 ) {
-
-    console.log("THIS IS PROCSS ")
     frappe.call({
         method: "intial_app.api.payment.process_payment",
         args: {
@@ -345,10 +351,13 @@ function process_payment(
         freeze: true,
         freeze_message: "Processing payment...",
         callback: function (r) {
+                console.log(r.message);
             if (!r.message) {
                 frappe.msgprint("No response received from Middleware.");
                 return;
             }
+            console.log(r.message);
+            
 
             store_payment_result(
                 frm,
@@ -357,7 +366,8 @@ function process_payment(
                 mobile,
                 transaction_id,
                 sender_account,
-                mode_of_payment
+                mode_of_payment,
+                install_no
             );
         }
     });
@@ -370,7 +380,8 @@ function store_payment_result(
     mobile,
     transaction_id,
     sender_account,
-    mode_of_payment
+    mode_of_payment,
+    install_no
 ) {
     frappe.call({
         method: "intial_app.api.payment.save_payment_result",
@@ -383,7 +394,8 @@ function store_payment_result(
             bank_reference: response.bank_reference,
             failure_reason: response.reason,
             sender_account: sender_account,
-            mode_of_payment: mode_of_payment
+            mode_of_payment: mode_of_payment,
+            install_no: install_no
         },
         callback: function (r) {
             if (!r.message || !r.message.success) {
@@ -400,7 +412,7 @@ function store_payment_result(
             if (response.status === "SUCCESS") {
                 frappe.msgprint({
                     title: "Payment Successful",
-                    message: `<b>Payment Successful</b><br><br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Installation No:</b> ${result.installation_no}<br><b>Amount:</b> ₹${amount}<br><b>Bank Reference:</b> ${result.bank_reference}<br><b>Payment Entry:</b> ${result.payment_entry || "Created"}`,
+                    message: `<b>Payment Successful</b><br><br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Installation No:</b> ${install_no}<br><b>Amount:</b> ₹${amount}<br><b>Bank Reference:</b> ${result.bank_reference}<br><b>Payment Entry:</b> ${result.payment_entry || "Created"}`,
                     indicator: "green"
                 });
             } else if (response.status === "PENDING") {
@@ -420,4 +432,90 @@ function store_payment_result(
             frm.reload_doc();
         }
     });
+}
+
+function set_tax_status_permission(frm) {
+    frappe.call({
+        method: "intial_app.api.purchase_invoice.check_tax_permission",
+        callback: function (r) {
+            const allowed = r.message?.allowed || false;
+            frm.__tax_permission = allowed;
+            frm.set_df_property("custom_tax_status", "read_only", 1);
+            frm.refresh_field("custom_tax_status");
+
+            if (allowed) {
+                add_tax_decision_button(frm);
+            }
+        }
+    });
+}
+
+function add_tax_decision_button(frm) {
+    frm.add_custom_button("Tax Decision", function () {
+        show_tax_decision_dialog(frm);
+    }, "Tax");
+}
+
+function show_tax_decision_dialog(frm) {
+    const dialog = new frappe.ui.Dialog({
+        title: "Tax Permission",
+        fields: [
+            {
+                fieldname: "decision",
+                fieldtype: "Select",
+                label: "Decision",
+                options: ["Accept", "Reject"],
+                reqd: 1
+            }
+        ],
+        primary_action_label: "Submit",
+        primary_action(values) {
+            if (!values.decision) {
+                frappe.msgprint("Please select Accept or Reject.");
+                return;
+            }
+
+            const decision = values.decision;
+            frappe.confirm(
+                `Are you sure you want to ${decision} this Purchase Invoice?`,
+                function () {
+                    frappe.call({
+                        method: "intial_app.api.purchase_invoice.update_tax_status",
+                        args: {
+                            invoice_name: frm.doc.name,
+                            status: decision
+                        },
+                        freeze: true,
+                        freeze_message: "Saving Tax Status...",
+                        callback: function (r) {
+                            if (!r.message || !r.message.success) {
+                                frappe.msgprint({
+                                    title: "Error",
+                                    message: "Could not save Tax Status.",
+                                    indicator: "red"
+                                });
+                                return;
+                            }
+
+                            frm.doc.custom_tax_status = r.message.status;
+                            frm.refresh_field("custom_tax_status");
+                            dialog.hide();
+                            frappe.show_alert({
+                                message: `Tax Status saved as ${decision}`,
+                                indicator: decision === "Accept" ? "green" : "red"
+                            });
+                        }
+                    });
+                },
+                function () {
+                    frappe.show_alert({
+                        message: "Tax Status was not changed.",
+                        indicator: "orange"
+                    });
+                }
+            );
+        }
+    });
+
+    dialog.show();
 }

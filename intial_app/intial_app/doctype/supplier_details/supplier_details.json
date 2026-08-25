@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "creation": "2026-08-24 14:13:16.396394",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "supplier_name",
+  "total_outstanding",
+  "total_tax",
+  "payable_amount",
+  "pay"
+ ],
+ "fields": [
+  {
+   "fieldname": "supplier_name",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Supplier Name",
+   "options": "Supplier",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_outstanding",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Outstanding",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_tax",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Tax",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payable_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Payable Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pay",
+   "fieldtype": "Button",
+   "in_list_view": 1,
+   "label": "payment"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-24 15:23:41.278207",
+ "modified_by": "Administrator",
+ "module": "intial_app",
+ "name": "Supplier Details",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
