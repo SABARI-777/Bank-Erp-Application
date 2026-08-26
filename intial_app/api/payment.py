@@ -71,19 +71,157 @@ def verify_otp(
 
     return response.json().get("message")
 
-
 @frappe.whitelist(allow_guest=True)
-def verify_bulk_otp(otp_verification_id, otp, invoices, mobile=None):
-    if not otp_verification_id or not otp or not invoices:
-        frappe.throw(_("Verification ID, OTP, and Invoices are mandatory."))
+def verify_bulk_otp(
+    otp_verification_id,
+    otp,
+    invoices,
+    mobile=None
+):
+
+    if not otp_verification_id or not otp:
+        frappe.throw(
+            _("OTP Verification ID and OTP are required.")
+        )
+
+    if not invoices:
+        frappe.throw(
+            _("Purchase Invoices are required.")
+        )
 
     if isinstance(invoices, str):
         invoices = frappe.parse_json(invoices)
 
+    if not isinstance(invoices, list):
+        frappe.throw(
+            _("Invoices must be a list.")
+        )
+
+    updated_invoices = []
+
+    for invoice_data in invoices:
+
+        invoice_id = invoice_data.get("invoice_id")
+
+        if not invoice_id:
+            frappe.throw(
+                _("Purchase Invoice ID is required.")
+            )
+
+        amount = flt(
+            invoice_data.get("amount") or 0
+        )
+
+        if amount <= 0:
+            frappe.throw(
+                _(
+                    "Payment amount for {0} "
+                    "must be greater than zero."
+                ).format(invoice_id)
+            )
+ 
+
+        invoice = frappe.get_doc(
+            "Purchase Invoice",
+            invoice_id
+        )
+
+        supplier = invoice.supplier
+
+        if not supplier:
+            frappe.throw(
+                _("Supplier is missing for {0}.").format(
+                    invoice_id
+                )
+            )
+ 
+        receiver_bank_account = frappe.db.get_value(
+            "Bank Account",
+            {
+                "party_type": "Supplier",
+                "party": supplier,
+                "disabled": 0
+            },
+            "name"
+        )
+
+        if not receiver_bank_account:
+            frappe.throw(
+                _(
+                    "Supplier {0} does not have "
+                    "a default Bank Account."
+                ).format(
+                    supplier
+                )
+            )
+ 
+
+        receiver_account_number = frappe.db.get_value(
+            "Bank Account",
+            receiver_bank_account,
+            "bank_account_no"
+        )
+
+        if not receiver_account_number:
+            frappe.throw(
+                _(
+                    "Bank Account {0} has no "
+                    "Bank Account Number."
+                ).format(
+                    receiver_bank_account
+                )
+            )
+ 
+
+        existing_numbers = [
+            cint(row.installation_no or 0)
+            for row in invoice.get("custom_install", [])
+        ]
+
+        install_no = (
+            max([0] + existing_numbers) + 1
+        )
+ 
+
+        updated_invoices.append({
+
+            "invoice_id": invoice_id,
+
+            "amount": amount,
+
+            "mobile": (
+                invoice_data.get("mobile")
+                or mobile
+            ),
+
+            "install_no": install_no,
+
+            "receiver_bank_account": (
+                receiver_bank_account
+            ),
+
+            "receiver_account_number": (
+                receiver_account_number
+            ),
+
+            "mode_of_payment": (
+                invoice_data.get("mode_of_payment")
+            ),
+
+            "sender_account": (
+                invoice_data.get("sender_account")
+            )
+        })
+ 
+
     payload = {
+
         "otp_verification_id": otp_verification_id,
+
         "otp": otp,
-        "invoices": invoices,
+
+        "invoices": updated_invoices,
+
         "mobile": mobile
     }
 
@@ -92,8 +230,16 @@ def verify_bulk_otp(otp_verification_id, otp, invoices, mobile=None):
         json=payload,
         timeout=30
     )
+
     if response.status_code != 200:
-        frappe.throw(_("Middleware Bulk Verification Error: {0}").format(response.text))
+
+        frappe.throw(
+            _(
+                "Middleware Bulk Verification Error: {0}"
+            ).format(
+                response.text
+            )
+        )
 
     return response.json().get("message")
 
@@ -205,97 +351,6 @@ def create_processing_payment(
         "transaction_id": transaction_id,
         "payment_status": "Pending"
     }
-
-@frappe.whitelist(allow_guest=True)
-def process_payment(
-    transaction_id,
-    amount,
-    invoice_id,
-    mobile,
-    receiver_bank_account,
-    mode_of_payment,
-    sender_account,
-    install_no=None
-):
-    if not sender_account or not receiver_bank_account:
-        frappe.throw(
-            _("Sender and Receiver Bank Accounts are required.")
-        )
-
-    bank_account_doc = frappe.get_doc(
-        "Bank Account",
-        receiver_bank_account
-    )
-
-    receiver_account_no = bank_account_doc.bank_account_no
-
-    if not receiver_account_no:
-        frappe.throw(
-            _("Bank Account '{0}' has no Bank Account Number.").format(
-                receiver_bank_account
-            )
-        )
-
-    payload = {
-        "transaction_id": transaction_id,
-        "amount": flt(amount),
-        "invoice_id": invoice_id,
-        "mobile": mobile,
-        "receiver_bank_account": receiver_bank_account,
-        "receiver_account_number": receiver_account_no,
-        "mode_of_payment": mode_of_payment,
-        "sender_account": sender_account,
-        "install_no": install_no
-    }
-
-
-    response = requests.post(
-        f"{MIDDLEWARE_URL}.process_payment",
-        json=payload,
-        timeout=300
-    )
-
-    if response.status_code != 200:
-        frappe.throw(
-            _("Middleware Processing Error: {0}").format(
-                response.text
-            )
-        )
-
-
-    response_data = response.json()
-
-    result = response_data.get("message") or {}
-
-    print("DIRECT BANK RESULT:", result)
-
-    status = str(
-        result.get("status") or ""
-    ).strip().upper()
-
-  
-
-    failure_reason = (
-        result.get("failure_reason")
-        or result.get("reason")
-        or result.get("message")
-    )
-
-
-    save_payment_result(
-        invoice_id=invoice_id,
-        transaction_id=transaction_id,
-        amount=amount,
-        mobile=mobile,
-        status=status,
-        failure_reason=failure_reason,
-        sender_account=sender_account,
-        mode_of_payment=mode_of_payment,
-        install_no=install_no
-    )
-
-    return result
-
 
 @frappe.whitelist(allow_guest=True)
 def save_payment_result(
@@ -453,16 +508,84 @@ def create_payment_entry_for_invoice(
     payment_entry.submit()
     return payment_entry.name
 
+def call_middleware_payment_initiation():
+
+    url = (
+        "http://middleware_site:8000"
+        "/api/method/middleware_app.api.payment.initiate_pending_transactions"
+    )
+
+    api_key = frappe.conf.get("middleware_api_key")
+    api_secret = frappe.conf.get("middleware_api_secret")
+
+    headers = {
+        "Authorization": f"token {api_key}:{api_secret}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            timeout=300
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "Middleware Payment Initiation Error"
+        )
+        raise
 
 def call_middleware_payment_check():
+
     url = (
         "http://middleware_site:8000"
         "/api/method/middleware_app.api.payment.check_pending_payments"
     )
+
+    api_key = frappe.conf.get("middleware_api_key")
+    api_secret = frappe.conf.get("middleware_api_secret")
+
+    headers = {
+        "Authorization": f"token {api_key}:{api_secret}",
+        "Content-Type": "application/json"
+    }
+
     try:
-        response = requests.post(url, timeout=300)
-        response.raise_for_status()
+
+        response = requests.post(
+            url,
+            headers=headers,
+            timeout=300
+        )
+
+        if response.status_code != 200:
+
+            frappe.log_error(
+                (
+                    f"HTTP Status: {response.status_code}\n"
+                    f"Response:\n{response.text}"
+                ),
+                "Middleware Payment Check HTTP Error"
+            )
+
+            frappe.throw(
+                f"Middleware returned {response.status_code}: "
+                f"{response.text}"
+            )
+
         return response.json()
+
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "Middleware Payment Check Error")
+
+        frappe.log_error(
+            frappe.get_traceback(),
+            "Middleware Payment Check Error"
+        )
+
         raise

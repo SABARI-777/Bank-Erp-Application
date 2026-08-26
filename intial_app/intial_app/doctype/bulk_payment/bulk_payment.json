@@ -8,15 +8,9 @@
  "engine": "InnoDB",
  "field_order": [
   "supplier_details",
-  "purchase_invoice_details",
-  "bulk_payment_data"
+  "amended_from"
  ],
  "fields": [
-  {
-   "fieldname": "bulk_payment_data",
-   "fieldtype": "Long Text",
-   "label": "Bulk Payment Data"
-  },
   {
    "fieldname": "supplier_details",
    "fieldtype": "Table",
@@ -24,16 +18,21 @@
    "options": "Supplier Details"
   },
   {
-   "fieldname": "purchase_invoice_details",
-   "fieldtype": "Table",
-   "label": "Purchase Invoice Details",
-   "options": "Purchase Invoice Details"
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Bulk Payment",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "is_submittable": 1,
  "links": [],
- "modified": "2026-08-24 14:25:28.611555",
+ "modified": "2026-08-26 16:46:13.789705",
  "modified_by": "Administrator",
  "module": "intial_app",
  "name": "Bulk Payment",

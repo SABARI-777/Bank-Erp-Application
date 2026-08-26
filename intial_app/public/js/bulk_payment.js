@@ -1,18 +1,69 @@
 frappe.ui.form.on("Bulk Payment", {
-    refresh(frm) {
-        if (frm.is_new()) {
-            return;
+    setup(frm) {
+        setup_supplier_details_grid(frm);
+    },
+
+    onload(frm) {
+        setup_supplier_details_grid(frm);
+        if (frm.is_new() && (!frm.doc.supplier_details || !frm.doc.supplier_details.length)) {
+            frm.add_child("supplier_details");
+            frm.refresh_field("supplier_details");
         }
-        frm.add_custom_button("Recalculate", function () {
-            recalculate_bulk_payment(frm);
-        });
-        frm.add_custom_button("Pay", function () {
-            start_bulk_payment(frm);
+    },
+
+    refresh(frm) {
+        setup_supplier_details_grid(frm);
+        if (!frm.is_new() && frm.doc.docstatus === 0) {
+            frm.add_custom_button("Pay", function () {
+                start_bulk_payment(frm);
+            });
+        }
+    },
+
+    validate(frm) {
+        if (!frm.doc.supplier_details || !frm.doc.supplier_details.length) {
+            frappe.throw("Please select a Supplier.");
+        }
+        frm.doc.supplier_details.forEach(function(row) {
+            if (!row.supplier_name) {
+                frappe.throw("Please select a Supplier for every row.");
+            }
         });
     }
 });
 
+function setup_supplier_details_grid(frm) {
+    if (!frm.fields_dict.supplier_details) return;
+    const grid = frm.fields_dict.supplier_details.grid;
+    if (!grid) return;
+
+    if (frm.doc.docstatus === 0) {
+        grid.cannot_add_rows = false;
+        grid.cannot_delete_rows = false;
+        frm.set_df_property("supplier_details", "read_only", 0);
+    } else {
+        grid.cannot_add_rows = true;
+        grid.cannot_delete_rows = true;
+        frm.set_df_property("supplier_details", "read_only", 1);
+    }
+}
+
+function hide_supplier_add_row(frm) {
+    if (!frm.fields_dict.supplier_details) return;
+    const grid = frm.fields_dict.supplier_details.grid;
+    if (!grid || !grid.wrapper) return;
+
+    $(grid.wrapper).find(".grid-add-row").hide();
+    $(grid.wrapper).find(".grid-remove-rows").hide();
+    $(grid.wrapper).find(".grid-footer").hide();
+}
+
 frappe.ui.form.on("Supplier Details", {
+    supplier_name(frm, cdt, cdn) {
+        const row = locals[cdt][cdn];
+        if (!row.supplier_name) return;
+    },
+
     pay(frm, cdt, cdn) {
         const row = locals[cdt][cdn];
         if (!row.supplier_name) {
@@ -23,6 +74,16 @@ frappe.ui.form.on("Supplier Details", {
             });
             return;
         }
+
+        if (!row.supplier_account) {
+            frappe.msgprint({
+                title: "Supplier Account Required",
+                message: "Supplier Bank Account has not been fetched yet. Save the Bulk Payment first.",
+                indicator: "orange"
+            });
+            return;
+        }
+
         open_supplier_payment_popup(frm, row.supplier_name);
     }
 });
@@ -52,6 +113,7 @@ function open_supplier_payment_popup(frm, supplier_name) {
 
 function show_supplier_payment_popup(frm, data) {
     let invoice_rows = "";
+
     (data.invoices || []).forEach(function (invoice) {
         invoice_rows += `
             <tr data-row-name="${invoice.name}">
@@ -65,14 +127,24 @@ function show_supplier_payment_popup(frm, data) {
                         class="form-control bulk-payment-amount"
                         data-row-name="${invoice.name}"
                         data-payable="${invoice.payable_amount}"
-                        value="${flt(invoice.amount_paid)}"
+                        value="0"
                         min="0"
+                        max="${invoice.payable_amount}"
                         step="0.01"
                     >
                 </td>
             </tr>
         `;
     });
+
+    if (!invoice_rows) {
+        frappe.msgprint({
+            title: "No Eligible Invoices",
+            message: "There are no Purchase Invoices available for payment.",
+            indicator: "orange"
+        });
+        return;
+    }
 
     const dialog = new frappe.ui.Dialog({
         title: `Payment - ${data.supplier}`,
@@ -118,11 +190,14 @@ function show_supplier_payment_popup(frm, data) {
     update_bulk_payment_total(dialog);
 
     dialog.$wrapper.on("input", ".bulk-payment-amount", function () {
-        update_bulk_payment_total(dialog);
-    });
+        const input = $(this);
+        const payable = flt(input.attr("data-payable"));
+        const amount = flt(input.val());
 
-    dialog.$wrapper.on("click", "#bulk-recalculate-btn", function () {
-        recalculate_supplier_popup(frm, dialog, data.supplier);
+        if (amount > payable) input.val(payable.toFixed(2));
+        if (amount < 0) input.val("0");
+
+        update_bulk_payment_total(dialog);
     });
 }
 
@@ -132,52 +207,6 @@ function update_bulk_payment_total(dialog) {
         total += flt($(this).val());
     });
     dialog.$wrapper.find(".bulk-total").text(total.toFixed(2));
-}
-
-function recalculate_supplier_popup(frm, dialog, supplier_name) {
-    frappe.call({
-        method: "intial_app.api.bulk_payment.get_supplier_invoices",
-        args: {
-            bulk_payment_name: frm.doc.name,
-            supplier_name: supplier_name
-        },
-        freeze: true,
-        freeze_message: "Getting latest Purchase Invoice amounts...",
-        callback: function (r) {
-            if (!r.message || !r.message.success) {
-                frappe.msgprint({
-                    title: "Recalculate Failed",
-                    message: r.message?.message || "Could not refresh invoice amounts.",
-                    indicator: "red"
-                });
-                return;
-            }
-
-            const invoices = r.message.invoices || [];
-            invoices.forEach(function (invoice) {
-                const input = dialog.$wrapper.find(`.bulk-payment-amount[data-row-name="${invoice.name}"]`);
-                const row = dialog.$wrapper.find(`tr[data-row-name="${invoice.name}"]`);
-
-                if (!row.length) return;
-
-                row.find("td:nth-child(2)").text(`₹${flt(invoice.outstanding_amount).toFixed(2)}`);
-                row.find("td:nth-child(3)").text(`₹${flt(invoice.tax_amount).toFixed(2)}`);
-                row.find("td:nth-child(4)").text(`₹${flt(invoice.payable_amount).toFixed(2)}`);
-
-                input.attr("data-payable", invoice.payable_amount);
-                const current_amount = flt(input.val());
-                if (current_amount > flt(invoice.payable_amount)) {
-                    input.val(invoice.payable_amount);
-                }
-            });
-
-            update_bulk_payment_total(dialog);
-            frappe.show_alert({
-                message: "Latest Purchase Invoice amounts loaded.",
-                indicator: "green"
-            });
-        }
-    });
 }
 
 function save_supplier_payment(frm, dialog, data) {
@@ -210,11 +239,12 @@ function save_supplier_payment(frm, dialog, data) {
             return false;
         }
 
+        if (amount <= 0) return;
+
         const invoice = data.invoices.find(item => item.name === row_name);
         if (!invoice) return;
 
         payments.push({
-            row_name: row_name,
             purchase_invoice_id: invoice.purchase_invoice_id,
             amount_paid: amount
         });
@@ -222,10 +252,10 @@ function save_supplier_payment(frm, dialog, data) {
 
     if (invalid) return;
 
-    if (!payments.some(row => row.amount_paid > 0)) {
+    if (!payments.length) {
         frappe.msgprint({
             title: "Amount Required",
-            message: "Enter at least one payment amount.",
+            message: "Enter an amount for at least one invoice.",
             indicator: "orange"
         });
         return;
@@ -239,7 +269,7 @@ function save_supplier_payment(frm, dialog, data) {
             payments: JSON.stringify(payments)
         },
         freeze: true,
-        freeze_message: "Validating and saving payment...",
+        freeze_message: "Saving payment details...",
         callback: function (r) {
             if (!r.message || !r.message.success) {
                 frappe.msgprint({
@@ -253,32 +283,7 @@ function save_supplier_payment(frm, dialog, data) {
             dialog.hide();
             frm.reload_doc();
             frappe.show_alert({
-                message: "Bulk payment details saved successfully.",
-                indicator: "green"
-            });
-        }
-    });
-}
-
-function recalculate_bulk_payment(frm) {
-    frappe.call({
-        method: "intial_app.api.bulk_payment.recalculate_bulk_payment",
-        args: { bulk_payment_name: frm.doc.name },
-        freeze: true,
-        freeze_message: "Recalculating latest Purchase Invoice amounts...",
-        callback: function (r) {
-            if (!r.message || !r.message.success) {
-                frappe.msgprint({
-                    title: "Recalculate Failed",
-                    message: r.message?.message || "Unable to recalculate Bulk Payment.",
-                    indicator: "red"
-                });
-                return;
-            }
-
-            frm.reload_doc();
-            frappe.show_alert({
-                message: "Bulk Payment amounts recalculated successfully.",
+                message: "Payment amount saved successfully.",
                 indicator: "green"
             });
         }
@@ -288,14 +293,16 @@ function recalculate_bulk_payment(frm) {
 function start_bulk_payment(frm) {
     frappe.call({
         method: "intial_app.api.bulk_payment.get_bulk_payment_details",
-        args: { bulk_payment_name: frm.doc.name },
+        args: {
+            bulk_payment_name: frm.doc.name
+        },
         freeze: true,
-        freeze_message: "Validating Bulk Payment...",
+        freeze_message: "Preparing Bulk Payment...",
         callback: function (r) {
             if (!r.message || !r.message.success) {
                 frappe.msgprint({
                     title: "Payment Cannot Start",
-                    message: r.message?.message || "Bulk Payment validation failed.",
+                    message: r.message?.message || "Unable to prepare Bulk Payment.",
                     indicator: "red"
                 });
                 return;
@@ -307,6 +314,7 @@ function start_bulk_payment(frm) {
 
 function show_bulk_payment_authorization(frm, data) {
     let invoice_html = "";
+
     (data.invoices || []).forEach(function (invoice) {
         invoice_html += `
             <tr>
@@ -354,7 +362,12 @@ function show_bulk_payment_authorization(frm, data) {
                 label: "Sender Account",
                 fieldtype: "Link",
                 options: "Bank Account",
-                reqd: 1
+                reqd: 1,
+                onchange: function () {
+                    const sender_account = dialog.get_value("sender_account");
+                    if (!sender_account) return;
+                    fetch_sender_mobile(dialog, sender_account);
+                }
             },
             {
                 fieldname: "mode_of_payment",
@@ -367,11 +380,28 @@ function show_bulk_payment_authorization(frm, data) {
                 fieldname: "sender_mobile",
                 label: "Sender Mobile",
                 fieldtype: "Data",
+                read_only: 1,
                 reqd: 1
             }
         ],
         primary_action_label: "Request OTP",
         primary_action: function () {
+            const values = dialog.get_values();
+            if (!values) return;
+
+            if (!values.sender_account) {
+                frappe.msgprint("Please select Sender Account.");
+                return;
+            }
+            if (!values.mode_of_payment) {
+                frappe.msgprint("Please select Mode of Payment.");
+                return;
+            }
+            if (!values.sender_mobile) {
+                frappe.msgprint("Sender mobile is missing.");
+                return;
+            }
+
             request_bulk_otp(frm, dialog, data);
         }
     });
@@ -379,7 +409,23 @@ function show_bulk_payment_authorization(frm, data) {
     dialog.show();
 }
 
-function request_bulk_otp(frm, dialog, data) {
+function fetch_sender_mobile(dialog, sender_account) {
+    frappe.db.get_value("Bank Account", sender_account, "custom_mobile_number").then(function (r) {
+        const mobile = r.message?.custom_mobile_number;
+        if (!mobile) {
+            dialog.set_value("sender_mobile", "");
+            frappe.msgprint({
+                title: "Mobile Number Missing",
+                message: `Bank Account ${sender_account} does not have a mobile number.`,
+                indicator: "orange"
+            });
+            return;
+        }
+        dialog.set_value("sender_mobile", mobile);
+    });
+}
+
+function validate_authorization(frm, dialog, data) {
     const values = dialog.get_values();
     if (!values) return;
 
@@ -403,8 +449,52 @@ function request_bulk_otp(frm, dialog, data) {
 
     if (!values.sender_mobile) {
         frappe.msgprint({
-            title: "Mobile Number Required",
-            message: "Please enter Sender Mobile Number.",
+            title: "Mobile Number Missing",
+            message: "Mobile number could not be fetched from the Sender Account.",
+            indicator: "orange"
+        });
+        return;
+    }
+
+    frappe.show_alert({
+        message: "Authorization details validated.",
+        indicator: "green"
+    });
+
+    console.log("Bulk Payment Authorization:", {
+        sender_account: values.sender_account,
+        mode_of_payment: values.mode_of_payment,
+        sender_mobile: values.sender_mobile,
+        total_amount: data.total_amount
+    });
+}
+
+function request_bulk_otp(frm, authorization_dialog, data) {
+    const values = authorization_dialog.get_values();
+    if (!values) return;
+
+    if (!values.sender_account) {
+        frappe.msgprint({
+            title: "Sender Account Required",
+            message: "Please select Sender Account.",
+            indicator: "orange"
+        });
+        return;
+    }
+
+    if (!values.mode_of_payment) {
+        frappe.msgprint({
+            title: "Mode of Payment Required",
+            message: "Please select Mode of Payment.",
+            indicator: "orange"
+        });
+        return;
+    }
+
+    if (!values.sender_mobile) {
+        frappe.msgprint({
+            title: "Mobile Number Missing",
+            message: "Sender mobile could not be fetched.",
             indicator: "orange"
         });
         return;
@@ -424,9 +514,8 @@ function request_bulk_otp(frm, dialog, data) {
                 });
                 return;
             }
-
             const otp_verification_id = r.message.otp_verification_id;
-            show_bulk_otp_dialog(frm, dialog, data, values, otp_verification_id);
+            show_bulk_otp_dialog(frm, authorization_dialog, data, values, otp_verification_id);
         }
     });
 }
@@ -472,14 +561,25 @@ function verify_bulk_otp(frm, otp_dialog, authorization_dialog, data, values, ot
         return;
     }
 
-    const invoices_payload = (data.invoices || []).map(inv => ({
-        invoice_id: inv.purchase_invoice_id,
-        amount: inv.amount,
-        receiver_bank_account: inv.receiver_bank_account,
-        receiver_account_number: inv.receiver_account,
-        sender_account: values.sender_account,
-        mode_of_payment: values.mode_of_payment
-    }));
+    const invoices_payload = (data.invoices || []).map(function (invoice) {
+        return {
+            invoice_id: invoice.purchase_invoice_id,
+            amount: invoice.amount,
+            receiver_bank_account: invoice.receiver_bank_account,
+            receiver_account_number: invoice.receiver_account,
+            sender_account: values.sender_account,
+            mode_of_payment: values.mode_of_payment
+        };
+    });
+
+    if (!invoices_payload.length) {
+        frappe.msgprint({
+            title: "No Payment",
+            message: "No selected invoice payment was found.",
+            indicator: "orange"
+        });
+        return;
+    }
 
     frappe.call({
         method: "intial_app.api.payment.verify_bulk_otp",
@@ -490,7 +590,7 @@ function verify_bulk_otp(frm, otp_dialog, authorization_dialog, data, values, ot
             mobile: values.sender_mobile
         },
         freeze: true,
-        freeze_message: "Verifying Bulk OTP...",
+        freeze_message: "Verifying OTP...",
         callback: function (r) {
             if (!r.message || !r.message.success) {
                 if (r.message?.max_attempts) {
@@ -520,154 +620,25 @@ function verify_bulk_otp(frm, otp_dialog, authorization_dialog, data, values, ot
                 indicator: "green"
             });
 
-            show_bulk_submit_confirmation(frm, data, values, otp_verification_id, r.message.transactions);
-        }
-    });
-}
-
-function show_bulk_submit_confirmation(frm, data, values, otp_verification_id, transactions) {
-    let invoice_html = "";
-    (data.invoices || []).forEach(function (invoice) {
-        invoice_html += `
-            <tr>
-                <td>${invoice.purchase_invoice_id}</td>
-                <td>${invoice.receiver_account}</td>
-                <td>₹${flt(invoice.amount).toFixed(2)}</td>
-            </tr>
-        `;
-    });
-
-    const submit_dialog = new frappe.ui.Dialog({
-        title: "Confirm Bulk Payment",
-        size: "large",
-        fields: [
-            {
-                fieldname: "confirmation",
-                fieldtype: "HTML",
-                options: `
-                    <div>
-                        <div class="alert alert-success">
-                            <strong>OTP Verified</strong><br>
-                            Payment authorization successful.
-                        </div>
-                        <p><strong>Sender Account:</strong> ${values.sender_account}</p>
-                        <p><strong>Mode of Payment:</strong> ${values.mode_of_payment}</p>
-                        <table class="table table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>Purchase Invoice</th>
-                                    <th>Receiver Account</th>
-                                    <th>Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${invoice_html}
-                            </tbody>
-                        </table>
-                        <div style="text-align:right; font-size:18px;">
-                            <strong>Total: ₹${flt(data.total_amount).toFixed(2)}</strong>
-                        </div>
-                    </div>
-                `
-            }
-        ],
-        primary_action_label: "Submit Payment",
-        primary_action: function () {
-            submit_bulk_payment(frm, submit_dialog, data, values, otp_verification_id, transactions);
-        }
-    });
-
-    submit_dialog.show();
-}
-
-function submit_bulk_payment(frm, dialog, data, values, otp_verification_id, transactions) {
-    frappe.confirm(
-        `Are you sure you want to submit this bulk payment of ₹${flt(data.total_amount).toFixed(2)}?`,
-        function () {
-            frappe.call({
-                method: "intial_app.api.bulk_payment.submit_bulk_payment",
-                args: {
-                    bulk_payment_name: frm.doc.name,
-                    otp_verification_id: otp_verification_id,
-                    sender_account: values.sender_account,
-                    mode_of_payment: values.mode_of_payment,
-                    sender_mobile: values.sender_mobile,
-                    transactions: JSON.stringify(transactions)
-                },
-                freeze: true,
-                freeze_message: "Submitting Bulk Payment...",
-                callback: function (r) {
-                    if (!r.message || !r.message.success) {
-                        frappe.msgprint({
-                            title: "Bulk Payment Failed",
-                            message: r.message?.message || "Bulk payment could not be submitted.",
-                            indicator: "red"
-                        });
-                        return;
-                    }
-                    dialog.hide();
-                    show_bulk_payment_result(frm, r.message);
-                }
+            frappe.msgprint({
+                title: "Payment Authorized",
+                message: "OTP verified. Payment Transactions have been created with Pending status. Bank initiation will be handled by the scheduler.",
+                indicator: "green"
             });
-        }
-    );
-}
 
-function show_bulk_payment_result(frm, response) {
-    let html = "";
-    (response.results || []).forEach(function (result) {
-        let indicator = "blue";
-        if (result.status === "SUCCESS") {
-            indicator = "green";
-        } else if (result.status === "PENDING") {
-            indicator = "orange";
-        } else if (result.status === "FAILED") {
-            indicator = "red";
-        }
-        html += `
-            <tr>
-                <td>${result.purchase_invoice_id}</td>
-                <td>${result.transaction_id}</td>
-                <td>${result.installation_no}</td>
-                <td>₹${flt(result.amount).toFixed(2)}</td>
-                <td><span class="indicator ${indicator}">${result.status || "UNKNOWN"}</span></td>
-            </tr>
-        `;
-    });
+            console.log("BEFORE SUBMIT - Supplier Details:", frm.doc.supplier_details);
+            console.table(
+                frm.doc.supplier_details.map(row => ({
+                    supplier: row.supplier_name,
+                    account: row.supplier_account,
+                    outstanding: row.total_outstanding,
+                    tax: row.total_tax,
+                    payable: row.payable_amount,
+                    json: row.json
+                }))
+            );
 
-    const dialog = new frappe.ui.Dialog({
-        title: "Bulk Payment Result",
-        size: "extra-large",
-        fields: [
-            {
-                fieldname: "result",
-                fieldtype: "HTML",
-                options: `
-                    <div>
-                        <table class="table table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>Purchase Invoice</th>
-                                    <th>Transaction ID</th>
-                                    <th>Installation</th>
-                                    <th>Amount</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${html}
-                            </tbody>
-                        </table>
-                    </div>
-                `
-            }
-        ],
-        primary_action_label: "Close",
-        primary_action: function () {
-            dialog.hide();
-            frm.reload_doc();
+            frm.savesubmit();
         }
     });
-
-    dialog.show();
 }

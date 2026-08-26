@@ -261,6 +261,7 @@ app_license = "mit"
 #         "on_submit": "intial_app.api.payment_entry.on_payment_entry_submit"
 #     }
 # }
+
 doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js",
     "Bulk Payment": "public/js/bulk_payment.js",
@@ -274,11 +275,16 @@ doc_events = {
         "validate": "intial_app.api.bulk_payment.validate_bulk_payment"
     }
 }
-
 scheduler_events = {
     "cron": {
+
         "*/5 * * * *": [
+            "intial_app.api.payment.call_middleware_payment_initiation"
+        ],
+
+        "2-59/5 * * * *": [
             "intial_app.api.payment.call_middleware_payment_check"
         ]
+
     }
 }

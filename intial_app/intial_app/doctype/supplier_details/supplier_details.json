@@ -7,10 +7,12 @@
  "engine": "InnoDB",
  "field_order": [
   "supplier_name",
+  "supplier_account",
   "total_outstanding",
   "total_tax",
   "payable_amount",
-  "pay"
+  "pay",
+  "json"
  ],
  "fields": [
   {
@@ -47,13 +49,26 @@
    "fieldtype": "Button",
    "in_list_view": 1,
    "label": "payment"
+  },
+  {
+   "fieldname": "supplier_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "supplier account",
+   "options": "Bank Account"
+  },
+  {
+   "fieldname": "json",
+   "fieldtype": "Long Text",
+   "in_list_view": 1,
+   "label": "JSON"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-24 15:23:41.278207",
+ "modified": "2026-08-26 10:40:10.053795",
  "modified_by": "Administrator",
  "module": "intial_app",
  "name": "Supplier Details",
