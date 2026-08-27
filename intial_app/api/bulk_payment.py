@@ -2,6 +2,9 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+def on_submit(doc, method=None):
+    doc.db_set("completed", 1)
+
 
 def get_invoice_tax(invoice):
     return flt(invoice.taxes_and_charges_added or 0)
@@ -109,32 +112,6 @@ def validate_bulk_payment(doc, method=None):
             supplier_row.total_outstanding = summary["total_outstanding"]
             supplier_row.total_tax = summary["total_tax"]
             supplier_row.payable_amount = summary["payable_amount"]
-
-
-@frappe.whitelist()
-def get_bulk_supplier_details(bulk_payment_name):
-    if not bulk_payment_name:
-        frappe.throw(_("Bulk Payment is required."))
-
-    doc = frappe.get_doc("Bulk Payment", bulk_payment_name)
-    if not doc.supplier_details:
-        frappe.throw(_("Please select a Supplier."))
-
-    supplier_row = doc.supplier_details[0]
-    if not supplier_row.supplier_name:
-        frappe.throw(_("Supplier Name is required."))
-
-    summary = get_supplier_payment_summary(supplier_row.supplier_name)
-    return {
-        "success": True,
-        "supplier": summary["supplier"],
-        "supplier_account": summary["supplier_account"],
-        "supplier_account_number": summary["supplier_account_number"],
-        "total_outstanding": summary["total_outstanding"],
-        "total_tax": summary["total_tax"],
-        "payable_amount": summary["payable_amount"],
-        "invoices": summary["invoices"]
-    }
 
 
 @frappe.whitelist()

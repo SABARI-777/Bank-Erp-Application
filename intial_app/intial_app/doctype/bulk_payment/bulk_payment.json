@@ -8,7 +8,8 @@
  "engine": "InnoDB",
  "field_order": [
   "supplier_details",
-  "amended_from"
+  "amended_from",
+  "completed"
  ],
  "fields": [
   {
@@ -26,13 +27,22 @@
    "print_hide": 1,
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "0",
+   "fieldname": "completed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Completed",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-08-26 16:46:13.789705",
+ "modified": "2026-08-27 10:01:27.949745",
  "modified_by": "Administrator",
  "module": "intial_app",
  "name": "Bulk Payment",

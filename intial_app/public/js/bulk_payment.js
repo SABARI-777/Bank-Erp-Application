@@ -1,5 +1,6 @@
 frappe.ui.form.on("Bulk Payment", {
     setup(frm) {
+        
         setup_supplier_details_grid(frm);
     },
 
@@ -46,16 +47,6 @@ function setup_supplier_details_grid(frm) {
         grid.cannot_delete_rows = true;
         frm.set_df_property("supplier_details", "read_only", 1);
     }
-}
-
-function hide_supplier_add_row(frm) {
-    if (!frm.fields_dict.supplier_details) return;
-    const grid = frm.fields_dict.supplier_details.grid;
-    if (!grid || !grid.wrapper) return;
-
-    $(grid.wrapper).find(".grid-add-row").hide();
-    $(grid.wrapper).find(".grid-remove-rows").hide();
-    $(grid.wrapper).find(".grid-footer").hide();
 }
 
 frappe.ui.form.on("Supplier Details", {
@@ -148,15 +139,15 @@ function show_supplier_payment_popup(frm, data) {
 
     const dialog = new frappe.ui.Dialog({
         title: `Payment - ${data.supplier}`,
-        size: "extra-large",
+        size: "large",
         fields: [
             {
                 fieldname: "invoice_table",
                 fieldtype: "HTML",
                 options: `
-                    <div style="margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+                    <div style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                         <div><strong>Supplier:</strong> ${data.supplier}</div>
-                        <button class="btn btn-default btn-sm" id="bulk-recalculate-btn">Recalculate</button>
+                      
                     </div>
                     <div class="table-responsive">
                         <table class="table table-bordered">
@@ -174,7 +165,7 @@ function show_supplier_payment_popup(frm, data) {
                             </tbody>
                         </table>
                     </div>
-                    <div style="margin-top:15px; text-align:right; font-size:16px;">
+                    <div style="margin-top:10px; text-align:right; font-size:16px;">
                         <strong>Total Payment: ₹<span class="bulk-total">0.00</span></strong>
                     </div>
                 `
@@ -328,7 +319,7 @@ function show_bulk_payment_authorization(frm, data) {
 
     const dialog = new frappe.ui.Dialog({
         title: "Bulk Payment Authorization",
-        size: "extra-large",
+        size: "large",
         fields: [
             {
                 fieldname: "payment_summary",
@@ -627,16 +618,7 @@ function verify_bulk_otp(frm, otp_dialog, authorization_dialog, data, values, ot
             });
 
             console.log("BEFORE SUBMIT - Supplier Details:", frm.doc.supplier_details);
-            console.table(
-                frm.doc.supplier_details.map(row => ({
-                    supplier: row.supplier_name,
-                    account: row.supplier_account,
-                    outstanding: row.total_outstanding,
-                    tax: row.total_tax,
-                    payable: row.payable_amount,
-                    json: row.json
-                }))
-            );
+           
 
             frm.savesubmit();
         }
