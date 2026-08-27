@@ -1,6 +1,17 @@
 frappe.ui.form.on("Purchase Invoice", {
     refresh(frm) {
-        set_tax_status_permission(frm);
+        hide_tax_decision_buttons(frm);
+
+         if (frm.doc.docstatus !== 1) {
+            return;
+        }
+
+         if (!frm.doc.custom_tax_hold) {
+            return;
+        }
+
+          set_tax_status_permission(frm);
+
         if (frm.is_new() || flt(frm.doc.outstanding_amount) <= 0) {
             return;
         }
@@ -12,6 +23,7 @@ frappe.ui.form.on("Purchase Invoice", {
         if (payment_in_progress) {
             return;
         }
+
 
         frm.add_custom_button("Make Payment", function () {
             show_payment_dialog(frm);
@@ -435,87 +447,149 @@ function store_payment_result(
 }
 
 function set_tax_status_permission(frm) {
+
     frappe.call({
+
         method: "intial_app.api.purchase_invoice.check_tax_permission",
+
         callback: function (r) {
+
             const allowed = r.message?.allowed || false;
+
             frm.__tax_permission = allowed;
-            frm.set_df_property("custom_tax_status", "read_only", 1);
-            frm.refresh_field("custom_tax_status");
 
-            if (allowed) {
-                add_tax_decision_button(frm);
-            }
-        }
-    });
-}
-
-function add_tax_decision_button(frm) {
-    frm.add_custom_button("Tax Decision", function () {
-        show_tax_decision_dialog(frm);
-    }, "Tax");
-}
-
-function show_tax_decision_dialog(frm) {
-    const dialog = new frappe.ui.Dialog({
-        title: "Tax Permission",
-        fields: [
-            {
-                fieldname: "decision",
-                fieldtype: "Select",
-                label: "Decision",
-                options: ["Accept", "Reject"],
-                reqd: 1
-            }
-        ],
-        primary_action_label: "Submit",
-        primary_action(values) {
-            if (!values.decision) {
-                frappe.msgprint("Please select Accept or Reject.");
+            if (!allowed) {
+                hide_tax_decision_buttons(frm);
                 return;
             }
 
-            const decision = values.decision;
-            frappe.confirm(
-                `Are you sure you want to ${decision} this Purchase Invoice?`,
-                function () {
-                    frappe.call({
-                        method: "intial_app.api.purchase_invoice.update_tax_status",
-                        args: {
-                            invoice_name: frm.doc.name,
-                            status: decision
-                        },
-                        freeze: true,
-                        freeze_message: "Saving Tax Status...",
-                        callback: function (r) {
-                            if (!r.message || !r.message.success) {
-                                frappe.msgprint({
-                                    title: "Error",
-                                    message: "Could not save Tax Status.",
-                                    indicator: "red"
-                                });
-                                return;
-                            }
-
-                            frm.doc.custom_tax_status = r.message.status;
-                            frm.refresh_field("custom_tax_status");
-                            dialog.hide();
-                            frappe.show_alert({
-                                message: `Tax Status saved as ${decision}`,
-                                indicator: decision === "Accept" ? "green" : "red"
-                            });
-                        }
-                    });
-                },
-                function () {
-                    frappe.show_alert({
-                        message: "Tax Status was not changed.",
-                        indicator: "orange"
-                    });
-                }
-            );
+            // Only show when checkbox is checked
+            if (frm.doc.custom_tax_hold) {
+                add_tax_decision_buttons(frm);
+            } else {
+                hide_tax_decision_buttons(frm);
+            }
         }
     });
+}
 
-    dialog.show();
+
+function add_tax_decision_buttons(frm) {
+
+    // Prevent duplicate buttons
+    hide_tax_decision_buttons(frm);
+
+    frm.add_custom_button(
+        "Accept",
+        function () {
+
+            make_tax_decision(
+                frm,
+                "Accept"
+            );
+
+        },
+        "Tax"
+    );
+
+
+    frm.add_custom_button(
+        "Reject",
+        function () {
+
+            make_tax_decision(
+                frm,
+                "Reject"
+            );
+
+        },
+        "Tax"
+    );
+}
+
+
+function hide_tax_decision_buttons(frm) {
+
+    frm.remove_custom_button(
+        "Accept",
+        "Tax"
+    );
+
+    frm.remove_custom_button(
+        "Reject",
+        "Tax"
+    );
+}
+
+function make_tax_decision(frm, decision) {
+
+    frappe.confirm(
+        `Are you sure you want to ${decision} this Purchase Invoice?`,
+
+        function () {
+
+            frappe.call({
+
+                method:
+                    "intial_app.api.purchase_invoice.update_tax_status",
+
+                args: {
+                    invoice_name: frm.doc.name,
+                    decision: decision
+                },
+
+                freeze: true,
+
+                freeze_message: "Saving Tax Decision...",
+
+                callback: function (r) {
+
+                    if (
+                        !r.message ||
+                        !r.message.success
+                    ) {
+
+                        frappe.msgprint({
+                            title: "Error",
+                            message:
+                                "Could not save Tax Decision.",
+                            indicator: "red"
+                        });
+
+                        return;
+                    }
+ 
+                    frm.doc.custom_tax_hold =
+                        r.message.custom_tax_hold;
+
+                    frm.refresh_field(
+                        "custom_tax_hold"
+                    );
+
+                   
+                    hide_tax_decision_buttons(frm);
+ 
+                    frappe.show_alert({
+                        message:
+                            r.message.message ||
+                            `Tax ${decision}ed successfully.`,
+
+                        indicator:
+                            decision === "Accept"
+                                ? "green"
+                                : "red"
+                    });
+                }
+            });
+        },
+
+        function () {
+
+            frappe.show_alert({
+                message:
+                    "Tax decision was not changed.",
+                indicator: "orange"
+            });
+        }
+    );
 }

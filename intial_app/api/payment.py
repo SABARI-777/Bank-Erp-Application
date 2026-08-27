@@ -76,7 +76,8 @@ def verify_bulk_otp(
     otp_verification_id,
     otp,
     invoices,
-    mobile=None
+    mobile=None,
+    bulk_payment_name=None
 ):
 
     if not otp_verification_id or not otp:
@@ -96,6 +97,8 @@ def verify_bulk_otp(
         frappe.throw(
             _("Invoices must be a list.")
         )
+    if not bulk_payment_name:
+        frappe.throw("Bulk Payment is required.")
 
     updated_invoices = []
 
@@ -240,6 +243,16 @@ def verify_bulk_otp(
                 response.text
             )
         )
+    bulk_payment = frappe.get_doc(
+    "Bulk Payment",
+    bulk_payment_name
+    )
+
+    bulk_payment.db_set(
+        "completed",
+        1,
+        update_modified=True
+    )
 
     return response.json().get("message")
 
@@ -303,8 +316,9 @@ def create_processing_payment(
     tax_status = invoice.custom_tax_status or "Pending"
     outstanding_amount = flt(invoice.outstanding_amount)
     tax_amount = flt(invoice.taxes_and_charges_added)
+    tax_hold = invoice.custom_tax_hold
 
-    if tax_status == "Accept":
+    if tax_hold:
         payable_amount = outstanding_amount - tax_amount
     else:
         payable_amount = outstanding_amount
