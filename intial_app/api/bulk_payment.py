@@ -145,6 +145,54 @@ def get_supplier_payment_summary(supplier_name):
         "invoices": eligible_invoices
     }
 
+def validate_supplier_payment_status(supplier_name):
+
+    purchase_invoices = frappe.get_all(
+        "Purchase Invoice",
+        filters={
+            "supplier": supplier_name,
+            "docstatus": 1,
+            "outstanding_amount": [">", 0]
+        },
+        pluck="name"
+    )
+
+    if not purchase_invoices:
+        frappe.throw(
+            _(
+                "Supplier {0} has no submitted Purchase Invoice "
+                "with outstanding amount."
+            ).format(supplier_name)
+        )
+
+    has_eligible_invoice = False
+
+    for invoice_name in purchase_invoices:
+
+        invoice = frappe.get_doc(
+            "Purchase Invoice",
+            invoice_name
+        )
+
+        if has_active_payment(invoice):
+            continue
+
+        payable_amount = get_invoice_payable(invoice)
+
+        if payable_amount <= 0:
+            continue
+
+      
+        has_eligible_invoice = True
+
+    if not has_eligible_invoice:
+
+        frappe.throw(
+            _(
+                "Supplier {0} has no eligible Purchase Invoice "
+                "available for payment."
+            ).format(supplier_name)
+        )
 
 def validate_bulk_payment(doc, method=None):
     if not doc.supplier_details:
@@ -152,10 +200,21 @@ def validate_bulk_payment(doc, method=None):
 
     suppliers_seen = set()
     for supplier_row in doc.supplier_details:
-        if not supplier_row.supplier_name:
-            frappe.throw(_("Supplier Name is required."))
 
-        validate_supplier_not_in_pending_bulk_payment(supplier_row.supplier_name, doc.name)
+        if not supplier_row.supplier_name:
+            frappe.throw(
+                _("Supplier Name is required.")
+            )
+
+        validate_supplier_not_in_pending_bulk_payment(
+            supplier_row.supplier_name,
+            doc.name
+        )
+
+        validate_supplier_payment_status(
+            supplier_row.supplier_name
+        )
+
         supplier_key = supplier_row.supplier_name.strip().lower()
 
         if supplier_key in suppliers_seen:

@@ -313,7 +313,6 @@ def create_processing_payment(
         frappe.throw(_("Payment amount must be greater than zero."))
 
     invoice = frappe.get_doc("Purchase Invoice", invoice_id)
-    tax_status = invoice.custom_tax_status or "Pending"
     outstanding_amount = flt(invoice.outstanding_amount)
     tax_amount = flt(invoice.taxes_and_charges_added)
     tax_hold = invoice.custom_tax_hold
@@ -329,12 +328,12 @@ def create_processing_payment(
         frappe.throw(
             _(
                 "Payment amount cannot exceed ₹{0}. "
-                "Outstanding: ₹{1}, Tax: ₹{2}, Tax Status: {3}"
+                "Outstanding: ₹{1}, Tax: ₹{2}, Tax Hold: {3}"
             ).format(
                 frappe.format_value(payable_amount, {"fieldtype": "Currency"}),
                 frappe.format_value(outstanding_amount, {"fieldtype": "Currency"}),
                 frappe.format_value(tax_amount, {"fieldtype": "Currency"}),
-                tax_status
+                tax_hold
             )
         )
 
@@ -365,6 +364,64 @@ def create_processing_payment(
         "transaction_id": transaction_id,
         "payment_status": "Pending"
     }
+@frappe.whitelist(allow_guest=True)
+def process_payment(
+    transaction_id,
+    amount,
+    invoice_id=None,
+    mobile=None,
+    receiver_bank_account=None,
+    mode_of_payment=None,
+    sender_account=None,
+    install_no=None
+):
+    amount = flt(amount)
+
+    if amount <= 0:
+        frappe.throw(
+            _("Payment amount must be greater than zero.")
+        )
+
+    receiver_account_no = None
+
+    if receiver_bank_account:
+        receiver_account_no = frappe.db.get_value(
+            "Bank Account",
+            receiver_bank_account,
+            "bank_account_no"
+        )
+
+    if not receiver_account_no:
+        frappe.throw(
+            _("Receiver Bank Account Number is required.")
+        )
+
+    payload = {
+        "transaction_id": transaction_id,
+        "amount": amount,
+        "invoice_id": invoice_id,
+        "mobile": mobile,
+        "receiver_bank_account": receiver_bank_account,
+        "receiver_account_number": receiver_account_no,
+        "mode_of_payment": mode_of_payment,
+        "sender_account": sender_account,
+        "install_no": install_no
+    }
+
+    response = requests.post(
+        f"{MIDDLEWARE_URL}.process_payment",
+        json=payload,
+        timeout=300
+    )
+
+    if response.status_code != 200:
+        frappe.throw(
+            _("Middleware Processing Error: {0}").format(
+                response.text
+            )
+        )
+
+    return response.json().get("message")
 
 @frappe.whitelist(allow_guest=True)
 def save_payment_result(

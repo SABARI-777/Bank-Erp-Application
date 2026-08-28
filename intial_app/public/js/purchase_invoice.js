@@ -247,10 +247,12 @@ function show_payment_amount_dialog(
 ) {
     let outstanding_amount = flt(frm.doc.outstanding_amount);
     let tax_amount = flt(frm.doc.taxes_and_charges_added);
-    let tax_status = frm.doc.custom_tax_status || "Pending";
+
+    let tax_hold = frm.doc.custom_tax_hold;
 
     let payable_amount;
-    if (tax_status === "Accept") {
+
+    if (tax_hold) {
         payable_amount = outstanding_amount - tax_amount;
     } else {
         payable_amount = outstanding_amount;
@@ -267,7 +269,8 @@ function show_payment_amount_dialog(
                     <div style="margin-bottom: 15px;">
                         <div><strong>Outstanding Amount:</strong> ₹${outstanding_amount.toFixed(2)}</div>
                         <div><strong>Tax Amount:</strong> ₹${tax_amount.toFixed(2)}</div>
-                        <div><strong>Tax Status:</strong> ${tax_status}</div>
+                       <div>
+                        <strong>Tax Hold:</strong>${tax_hold ? "Accepted" : "Rejected"} </div>
                         <hr>
                         <div style="font-size: 16px;"><strong>Payable Amount:</strong> ₹${payable_amount.toFixed(2)}</div>
                     </div>
@@ -421,23 +424,71 @@ function store_payment_result(
 
             let result = r.message;
 
-            if (response.status === "SUCCESS") {
+                    const payment_status = String(
+                response.payment_status || response.status || ""
+            ).toUpperCase();
+            console.log(payment_status);
+            
+
+            if (payment_status === "SUCCESS" || payment_status === "COMPLETED") {
+
                 frappe.msgprint({
                     title: "Payment Successful",
-                    message: `<b>Payment Successful</b><br><br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Installation No:</b> ${install_no}<br><b>Amount:</b> ₹${amount}<br><b>Bank Reference:</b> ${result.bank_reference}<br><b>Payment Entry:</b> ${result.payment_entry || "Created"}`,
+                    message: `
+                        <b>Payment Successful</b><br><br>
+                        <b>Transaction ID:</b> ${result.transaction_id}<br>
+                        <b>Installation No:</b> ${install_no}<br>
+                        <b>Amount:</b> ₹${amount}<br>
+                        <b>Bank Reference:</b> ${result.bank_reference || "N/A"}<br>
+                        <b>Payment Entry:</b> ${result.payment_entry || "Created"}
+                    `,
                     indicator: "green"
                 });
-            } else if (response.status === "PENDING") {
+
+            } else if (
+                payment_status === "PENDING" ||
+                payment_status === "INITIATED"
+            ) {
+
                 frappe.msgprint({
                     title: "Payment Pending",
-                    message: `Payment is pending bank confirmation.<br><b>Transaction ID:</b> ${result.transaction_id}`,
+                    message: `
+                        Payment has been initiated and is waiting for bank confirmation.<br>
+                        <b>Transaction ID:</b> ${result.transaction_id}
+                    `,
                     indicator: "orange"
                 });
-            } else {
+
+            } else if (
+                payment_status === "FAILED" ||
+                payment_status === "REJECTED" ||
+                payment_status === "ERROR" ||
+                payment_status === "FAILURE"
+            ) {
+
                 frappe.msgprint({
                     title: "Payment Failed",
-                    message: `Payment failed.<br><b>Transaction ID:</b> ${result.transaction_id}<br><b>Reason:</b> ${result.failure_reason || response.reason || "Unknown error"}`,
+                    message: `
+                        Payment failed.<br>
+                        <b>Transaction ID:</b> ${result.transaction_id}<br>
+                        <b>Reason:</b> ${
+                            result.failure_reason ||
+                            response.reason ||
+                            "Unknown error"
+                        }
+                    `,
                     indicator: "red"
+                });
+
+            } else {
+
+                frappe.msgprint({
+                    title: "Payment Status",
+                    message: `
+                        Payment status: ${payment_status || "UNKNOWN"}<br>
+                        <b>Transaction ID:</b> ${result.transaction_id}
+                    `,
+                    indicator: "orange"
                 });
             }
 
@@ -463,7 +514,7 @@ function set_tax_status_permission(frm) {
                 return;
             }
 
-            // Only show when checkbox is checked
+           
             if (frm.doc.custom_tax_hold) {
                 add_tax_decision_buttons(frm);
             } else {
@@ -476,8 +527,7 @@ function set_tax_status_permission(frm) {
 
 function add_tax_decision_buttons(frm) {
 
-    // Prevent duplicate buttons
-    hide_tax_decision_buttons(frm);
+     hide_tax_decision_buttons(frm);
 
     frm.add_custom_button(
         "Accept",

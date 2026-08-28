@@ -273,7 +273,6 @@ doc_events = {
     },
     "Bulk Payment": {
         "validate": "intial_app.api.bulk_payment.validate_bulk_payment",
-        # "on_submit": "intial_app.api.bulk_payment.on_submit"
     }
 }
 scheduler_events = {

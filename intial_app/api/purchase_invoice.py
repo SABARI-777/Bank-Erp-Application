@@ -39,7 +39,6 @@ def check_tax_permission():
 
 def validate_tax_hold(doc, method=None):
 
-    # New document
     if doc.is_new():
         return
 
@@ -51,7 +50,6 @@ def validate_tax_hold(doc, method=None):
     old_hold = old_doc.custom_tax_hold
     new_hold = doc.custom_tax_hold
 
-    # Nothing changed
     if old_hold == new_hold:
         return
 
