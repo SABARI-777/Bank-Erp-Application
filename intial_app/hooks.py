@@ -264,16 +264,12 @@ app_license = "mit"
 
 doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js",
-    "Bulk Payment": "public/js/bulk_payment.js",
 }
 
 doc_events = {
     "Purchase Invoice": {
         "validate": "intial_app.api.purchase_invoice.validate_tax_hold"
     },
-    "Bulk Payment": {
-        "validate": "intial_app.api.bulk_payment.validate_bulk_payment",
-    }
 }
 scheduler_events = {
     "cron": {

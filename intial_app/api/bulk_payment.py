@@ -61,10 +61,6 @@ def validate_invoice_not_in_pending_bulk_payment(invoice_name, current_bulk_paym
         )
 
 
-def check_invoice_in_pending_bulk_payment(invoice_name, current_bulk_payment=None):
-    res = get_submitted_pending_bulk_payment_for_invoice(invoice_name, current_bulk_payment)
-    return {"exists": True, **res} if res else {"exists": False}
-
 
 def validate_supplier_not_in_pending_bulk_payment(supplier_name, current_bulk_payment=None):
     bulk_payments = frappe.get_all("Bulk Payment", filters={"docstatus": 1, "completed": 0}, fields=["name"])

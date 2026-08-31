@@ -514,7 +514,7 @@ function set_tax_status_permission(frm) {
                 return;
             }
 
-           
+          
             if (frm.doc.custom_tax_hold) {
                 add_tax_decision_buttons(frm);
             } else {

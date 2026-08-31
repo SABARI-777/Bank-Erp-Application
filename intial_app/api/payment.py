@@ -184,7 +184,6 @@ def verify_bulk_otp(
         install_no = (
             max([0] + existing_numbers) + 1
         )
- 
 
         updated_invoices.append({
 
@@ -248,11 +247,34 @@ def verify_bulk_otp(
     bulk_payment_name
     )
 
+
     bulk_payment.db_set(
         "completed",
         1,
         update_modified=True
     )
+
+    bulk_payment_child = frappe.get_doc("Bulk Payment",bulk_payment_name)
+
+    # print(doc)
+
+
+
+
+    print(bulk_payment_child)
+
+    for data in updated_invoices:
+        bulk_PI = bulk_payment_child.append("bulk_payment_pi_items",{})
+        print(data)
+        PI = data["invoice_id"]
+
+        invoice = frappe.get_doc("Purchase Invoice",PI)
+
+        bulk_PI.purchase_invoice = PI 
+        bulk_PI.outstanding_amount= invoice.outstanding_amount
+        bulk_PI.payment_amount =  data["amount"]
+
+    bulk_payment_child.save(ignore_permissions=True)
 
     return response.json().get("message")
 
